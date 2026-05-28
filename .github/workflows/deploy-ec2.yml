@@ -1,0 +1,98 @@
+name: Deploy EC2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "pom.xml"
+      - "src/**"
+      - ".github/workflows/deploy-ec2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-2
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Test and package
+        run: ./mvnw -q test package -Dquarkus.package.jar.type=uber-jar
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ secrets.TF_STATE_KEY }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Read Terraform outputs
+        id: infra
+        working-directory: infra/terraform
+        run: |
+          echo "artifact_bucket=$(terraform output -raw artifact_bucket_name)" >> "$GITHUB_OUTPUT"
+          echo "instance_id=$(terraform output -raw instance_id)" >> "$GITHUB_OUTPUT"
+          echo "service_url=$(terraform output -raw service_url)" >> "$GITHUB_OUTPUT"
+          echo "deploy_script=$(terraform output -raw deploy_script_path)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact to S3
+        id: upload
+        run: |
+          ARTIFACT_KEY="releases/${GITHUB_SHA}/nitra-ai-runner.jar"
+          ARTIFACT_PATH=$(ls target/*-runner.jar | head -n 1)
+
+          aws s3 cp "$ARTIFACT_PATH" "s3://${{ steps.infra.outputs.artifact_bucket }}/${ARTIFACT_KEY}"
+
+          echo "artifact_key=${ARTIFACT_KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSM
+        id: ssm
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ steps.infra.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy ${GITHUB_SHA}" \
+            --parameters commands="sudo ${{ steps.infra.outputs.deploy_script }} s3://${{ steps.infra.outputs.artifact_bucket }}/${{ steps.upload.outputs.artifact_key }}" \
+            --query "Command.CommandId" \
+            --output text)
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ steps.infra.outputs.instance_id }}"
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ steps.infra.outputs.instance_id }}"
+
+      - name: Smoke test
+        run: |
+          curl --fail --retry 15 --retry-delay 5 "${{ steps.infra.outputs.service_url }}/q/openapi" > /dev/null

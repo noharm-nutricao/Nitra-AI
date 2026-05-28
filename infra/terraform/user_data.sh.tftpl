@@ -1,0 +1,68 @@
+#!/bin/bash
+set -euxo pipefail
+
+dnf update -y
+dnf install -y java-21-amazon-corretto-headless awscli
+
+systemctl enable amazon-ssm-agent
+systemctl restart amazon-ssm-agent
+
+mkdir -p /opt/${project_name}
+mkdir -p /etc/${project_name}
+
+cat >/etc/${project_name}/${project_name}.env <<EOF
+AWS_REGION=${aws_region}
+QUARKUS_HTTP_PORT=${service_port}
+ARTIFACT_BUCKET_NAME=${artifact_bucket_name}
+EOF
+
+cat >/usr/local/bin/deploy-${project_name}.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Uso: deploy-${project_name}.sh s3://bucket/chave.jar"
+  exit 1
+fi
+
+ARTIFACT_URI="$1"
+APP_DIR="/opt/${project_name}"
+APP_JAR="${APP_DIR}/app.jar"
+
+aws s3 cp "${ARTIFACT_URI}" "${APP_JAR}"
+chown ec2-user:ec2-user "${APP_JAR}"
+chmod 640 "${APP_JAR}"
+
+systemctl daemon-reload
+systemctl restart ${project_name}.service
+systemctl --no-pager --full status ${project_name}.service
+EOF
+
+chmod +x /usr/local/bin/deploy-${project_name}.sh
+
+cat >/etc/systemd/system/${project_name}.service <<EOF
+[Unit]
+Description=${project_name} Quarkus application
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/${project_name}/app.jar
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/${project_name}
+EnvironmentFile=-/etc/${project_name}/${project_name}.env
+ExecStart=/bin/sh -c 'exec /usr/bin/java -Dquarkus.http.host=0.0.0.0 -Dquarkus.http.port=$${QUARKUS_HTTP_PORT:-8080} -Djava.util.logging.manager=org.jboss.logmanager.LogManager -jar /opt/${project_name}/app.jar'
+Restart=always
+RestartSec=5
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+chown -R ec2-user:ec2-user /opt/${project_name} /etc/${project_name}
+
+systemctl daemon-reload
+systemctl enable ${project_name}.service

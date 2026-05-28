@@ -1,0 +1,6 @@
+aws_region            = "us-east-2"
+project_name          = "nitra-ai"
+environment           = "prod"
+instance_type         = "t4g.micro"
+service_port          = 8080
+allowed_ingress_cidrs = ["0.0.0.0/0"]
