@@ -55,9 +55,13 @@ jobs:
             -backend-config="key=${{ secrets.TF_STATE_KEY }}" \
             -backend-config="region=${{ env.AWS_REGION }}"
 
+      - name: Ensure infrastructure
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve
+
       - name: Show Terraform outputs
         working-directory: infra/terraform
-        run: terraform output || true
+        run: terraform output
 
       - name: Read Terraform outputs
         id: infra
