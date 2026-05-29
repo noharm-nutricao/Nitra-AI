@@ -53,21 +53,32 @@ jobs:
           terraform init \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=${{ secrets.TF_STATE_KEY }}" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+            -backend-config="region=${{ env.AWS_REGION }}"
 
       - name: Read Terraform outputs
         id: infra
         working-directory: infra/terraform
         run: |
-          echo "artifact_bucket=$(terraform output -raw artifact_bucket_name)" >> "$GITHUB_OUTPUT"
-          echo "instance_id=$(terraform output -raw instance_id)" >> "$GITHUB_OUTPUT"
-          echo "service_url=$(terraform output -raw service_url)" >> "$GITHUB_OUTPUT"
-          echo "deploy_script=$(terraform output -raw deploy_script_path)" >> "$GITHUB_OUTPUT"
+          ARTIFACT_BUCKET=$(terraform output -raw artifact_bucket_name)
+          INSTANCE_ID=$(terraform output -raw instance_id)
+          SERVICE_URL=$(terraform output -raw service_url)
+          DEPLOY_SCRIPT=$(terraform output -raw deploy_script_path)
+
+          test -n "$ARTIFACT_BUCKET"
+          test -n "$INSTANCE_ID"
+          test -n "$SERVICE_URL"
+          test -n "$DEPLOY_SCRIPT"
+
+          echo "artifact_bucket=$ARTIFACT_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "deploy_script=$DEPLOY_SCRIPT" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact to S3
         id: upload
         run: |
+          test -n "${{ steps.infra.outputs.artifact_bucket }}"
+
           ARTIFACT_KEY="releases/${GITHUB_SHA}/nitra-ai-runner.jar"
           ARTIFACT_PATH=$(ls target/*-runner.jar | head -n 1)
 
