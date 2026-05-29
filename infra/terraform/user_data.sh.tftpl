@@ -27,11 +27,11 @@ fi
 
 ARTIFACT_URI="$1"
 APP_DIR="/opt/${project_name}"
-APP_JAR="${APP_DIR}/app.jar"
+APP_JAR="$${APP_DIR}/app.jar"
 
-aws s3 cp "${ARTIFACT_URI}" "${APP_JAR}"
-chown ec2-user:ec2-user "${APP_JAR}"
-chmod 640 "${APP_JAR}"
+aws s3 cp "$${ARTIFACT_URI}" "$${APP_JAR}"
+chown ec2-user:ec2-user "$${APP_JAR}"
+chmod 640 "$${APP_JAR}"
 
 systemctl daemon-reload
 systemctl restart ${project_name}.service
