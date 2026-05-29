@@ -71,6 +71,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
     id     = "expire-old-artifacts"
     status = "Enabled"
 
+    filter {}
+
     expiration {
       days = var.artifact_retention_days
     }
@@ -152,7 +154,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 
 resource "aws_security_group" "app" {
   name        = "${local.name_prefix}-sg"
-  description = "Acesso HTTP direto para a aplicação ${local.name_prefix}"
+  description = "Direct HTTP access for ${local.name_prefix}"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
@@ -160,7 +162,7 @@ resource "aws_security_group" "app" {
     to_port     = var.service_port
     protocol    = "tcp"
     cidr_blocks = var.allowed_ingress_cidrs
-    description = "Aplicação Quarkus"
+    description = "Quarkus app"
   }
 
   egress {
