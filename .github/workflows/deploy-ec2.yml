@@ -77,8 +77,10 @@ jobs:
           INSTANCE_ID=$(read_output instance_id)
           SERVICE_URL=$(read_output service_url)
           DEPLOY_SCRIPT=$(read_output deploy_script_path)
+          PROJECT_NAME=$(read_output project_name)
+          SERVICE_PORT=$(read_output service_port)
 
-          if [ -z "$ARTIFACT_BUCKET" ] || [ -z "$INSTANCE_ID" ] || [ -z "$SERVICE_URL" ] || [ -z "$DEPLOY_SCRIPT" ]; then
+          if [ -z "$ARTIFACT_BUCKET" ] || [ -z "$INSTANCE_ID" ] || [ -z "$SERVICE_URL" ] || [ -z "$DEPLOY_SCRIPT" ] || [ -z "$PROJECT_NAME" ] || [ -z "$SERVICE_PORT" ]; then
             echo "Terraform state não contém todos os outputs esperados." >&2
             echo "Confirme se o workflow Infra já executou terraform apply usando o mesmo TF_STATE_BUCKET e TF_STATE_KEY." >&2
             echo "Outputs atuais:" >&2
@@ -90,6 +92,8 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
           echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
           echo "deploy_script=$DEPLOY_SCRIPT" >> "$GITHUB_OUTPUT"
+          echo "project_name=$PROJECT_NAME" >> "$GITHUB_OUTPUT"
+          echo "service_port=$SERVICE_PORT" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact to S3
         id: upload
@@ -106,11 +110,30 @@ jobs:
       - name: Deploy via SSM
         id: ssm
         run: |
+          cat > deploy-remote.sh <<EOF
+          #!/bin/bash
+          set -euo pipefail
+
+          mkdir -p /etc/${{ steps.infra.outputs.project_name }}
+
+          cat >/etc/${{ steps.infra.outputs.project_name }}/${{ steps.infra.outputs.project_name }}.env <<ENVVARS
+          AWS_REGION=${{ env.AWS_REGION }}
+          QUARKUS_HTTP_PORT=${{ steps.infra.outputs.service_port }}
+          ARTIFACT_BUCKET_NAME=${{ steps.infra.outputs.artifact_bucket }}
+          COGNITO_ISSUER_URL=${{ secrets.COGNITO_ISSUER_URL }}
+          COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
+          ENVVARS
+
+          ${{ steps.infra.outputs.deploy_script }} s3://${{ steps.infra.outputs.artifact_bucket }}/${{ steps.upload.outputs.artifact_key }}
+          EOF
+
+          REMOTE_SCRIPT_B64=$(base64 -w 0 deploy-remote.sh)
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${{ steps.infra.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy ${GITHUB_SHA}" \
-            --parameters commands="sudo ${{ steps.infra.outputs.deploy_script }} s3://${{ steps.infra.outputs.artifact_bucket }}/${{ steps.upload.outputs.artifact_key }}" \
+            --parameters commands="echo ${REMOTE_SCRIPT_B64} | base64 -d >/tmp/deploy-remote.sh && sudo bash /tmp/deploy-remote.sh" \
             --query "Command.CommandId" \
             --output text)
 
