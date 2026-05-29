@@ -21,8 +21,7 @@ data "aws_ssm_parameter" "al2023_ami" {
 }
 
 locals {
-  name_prefix          = "${var.project_name}-${var.environment}"
-  artifact_bucket_name = lower("${var.project_name}-${var.environment}-${data.aws_caller_identity.current.account_id}-artifacts")
+  name_prefix = "${var.project_name}-${var.environment}"
   common_tags = {
     Project     = var.project_name
     Environment = var.environment
@@ -31,7 +30,7 @@ locals {
 }
 
 resource "aws_s3_bucket" "artifacts" {
-  bucket = local.artifact_bucket_name
+  bucket_prefix = "${local.name_prefix}-artifacts-"
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-artifacts"
@@ -97,7 +96,7 @@ data "aws_iam_policy_document" "ec2_assume_role" {
 }
 
 resource "aws_iam_role" "ec2_role" {
-  name               = "${local.name_prefix}-ec2-role"
+  name_prefix        = "${local.name_prefix}-ec2-role-"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 
   tags = local.common_tags
@@ -142,18 +141,18 @@ data "aws_iam_policy_document" "app_permissions" {
 }
 
 resource "aws_iam_role_policy" "app_permissions" {
-  name   = "${local.name_prefix}-app-policy"
-  role   = aws_iam_role.ec2_role.id
-  policy = data.aws_iam_policy_document.app_permissions.json
+  name_prefix = "${local.name_prefix}-app-policy-"
+  role        = aws_iam_role.ec2_role.id
+  policy      = data.aws_iam_policy_document.app_permissions.json
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${local.name_prefix}-instance-profile"
-  role = aws_iam_role.ec2_role.name
+  name_prefix = "${local.name_prefix}-instance-profile-"
+  role        = aws_iam_role.ec2_role.name
 }
 
 resource "aws_security_group" "app" {
-  name        = "${local.name_prefix}-sg"
+  name_prefix = "${local.name_prefix}-sg-"
   description = "Direct HTTP access for ${local.name_prefix}"
   vpc_id      = data.aws_vpc.default.id
 
@@ -189,7 +188,7 @@ resource "aws_instance" "app" {
     environment          = var.environment
     aws_region           = var.aws_region
     service_port         = var.service_port
-    artifact_bucket_name = local.artifact_bucket_name
+    artifact_bucket_name = aws_s3_bucket.artifacts.bucket
   })
 
   root_block_device {
