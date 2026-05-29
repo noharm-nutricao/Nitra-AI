@@ -55,19 +55,32 @@ jobs:
             -backend-config="key=${{ secrets.TF_STATE_KEY }}" \
             -backend-config="region=${{ env.AWS_REGION }}"
 
+      - name: Show Terraform outputs
+        working-directory: infra/terraform
+        run: terraform output || true
+
       - name: Read Terraform outputs
         id: infra
         working-directory: infra/terraform
         run: |
-          ARTIFACT_BUCKET=$(terraform output -raw artifact_bucket_name)
-          INSTANCE_ID=$(terraform output -raw instance_id)
-          SERVICE_URL=$(terraform output -raw service_url)
-          DEPLOY_SCRIPT=$(terraform output -raw deploy_script_path)
+          set -euo pipefail
 
-          test -n "$ARTIFACT_BUCKET"
-          test -n "$INSTANCE_ID"
-          test -n "$SERVICE_URL"
-          test -n "$DEPLOY_SCRIPT"
+          read_output() {
+            terraform output -raw "$1" 2>/dev/null || true
+          }
+
+          ARTIFACT_BUCKET=$(read_output artifact_bucket_name)
+          INSTANCE_ID=$(read_output instance_id)
+          SERVICE_URL=$(read_output service_url)
+          DEPLOY_SCRIPT=$(read_output deploy_script_path)
+
+          if [ -z "$ARTIFACT_BUCKET" ] || [ -z "$INSTANCE_ID" ] || [ -z "$SERVICE_URL" ] || [ -z "$DEPLOY_SCRIPT" ]; then
+            echo "Terraform state não contém todos os outputs esperados." >&2
+            echo "Confirme se o workflow Infra já executou terraform apply usando o mesmo TF_STATE_BUCKET e TF_STATE_KEY." >&2
+            echo "Outputs atuais:" >&2
+            terraform output || true
+            exit 1
+          fi
 
           echo "artifact_bucket=$ARTIFACT_BUCKET" >> "$GITHUB_OUTPUT"
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
