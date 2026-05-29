@@ -3,7 +3,8 @@ name: Deploy EC2
 on:
   push:
     branches:
-      - quandopronto
+      - master
+      - develop
     paths:
       - "pom.xml"
       - "src/**"
